@@ -92,8 +92,23 @@ echo "→ Combining iOS simulator slice (sherpa-onnx + ONNX Runtime) ..."
 libtool -static -o combined/ios-sim/libsherpa-onnx.a \
     "$SHERPA_IOS_SIM" "$ONNX_IOS_SIM" 2>&1 | grep -v "no symbols" | grep -v "same member name" || true
 
-echo "→ Using macOS slice as-is (ONNX Runtime already statically merged) ..."
-cp "$SHERPA_MAC" combined/macos/libsherpa-onnx.a
+# Despite the upstream tarball name "macos-xcframework-STATIC", the
+# macOS sherpa-onnx.a does NOT have ONNX Runtime merged in — "static"
+# here refers to "shipped as a static archive," not "deps statically
+# linked." The macOS slice in the onnxruntime.xcframework (the one
+# shipped INSIDE the iOS tarball, which carries iOS + iOS-sim + macos
+# slices) is where the macOS ONNX symbols live. Combine both, same as
+# we did for iOS.
+ONNX_MAC="${ONNX_DIR_ROOT}/${ONNX_VER_DIR}/onnxruntime.xcframework/macos-arm64_x86_64/onnxruntime.a"
+if [[ ! -e "$ONNX_MAC" ]]; then
+    echo "Error: expected macOS onnxruntime.a missing: $ONNX_MAC" >&2
+    echo "       (Did upstream change the onnxruntime.xcframework layout?)" >&2
+    exit 1
+fi
+
+echo "→ Combining macOS slice (sherpa-onnx + ONNX Runtime) ..."
+libtool -static -o combined/macos/libsherpa-onnx.a \
+    "$SHERPA_MAC" "$ONNX_MAC" 2>&1 | grep -v "no symbols" | grep -v "same member name" || true
 
 # ----------------------------------------------------------------------
 # 3. Stage headers + module.modulemap.
