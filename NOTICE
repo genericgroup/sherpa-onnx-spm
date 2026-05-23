@@ -1,0 +1,59 @@
+sherpa-onnx-spm
+Copyright 2026 genericgroup
+
+This product wraps and redistributes:
+
+1. sherpa-onnx (https://github.com/k2-fsa/sherpa-onnx)
+   Copyright 2023–present  Xiaomi Corporation and contributors
+   Licensed under the Apache License, Version 2.0.
+   The bundled XCFramework slices are derived from the v1.13.2
+   release tarballs (`sherpa-onnx-v1.13.2-ios.tar.bz2` and
+   `sherpa-onnx-v1.13.2-macos-xcframework-static.tar.bz2`).
+   The Swift wrapper at `Sources/SherpaOnnx/SherpaOnnx.swift` is a
+   verbatim copy of upstream's `swift-api-examples/SherpaOnnx.swift`
+   from the same v1.13.2 tag, with one line added at the top
+   (`import CSherpaOnnx`) so it can be consumed by Swift Package
+   Manager — upstream relies on an Xcode bridging header which SPM
+   packages do not support.
+
+2. ONNX Runtime (https://github.com/microsoft/onnxruntime)
+   Copyright (c) Microsoft Corporation
+   Licensed under the MIT License.
+   Version 1.17.1, statically merged into the bundled
+   `sherpa-onnx.xcframework` slices via `libtool -static`. The
+   merge process is documented in `scripts/build-xcframework.sh`.
+
+Both upstream licenses are reproduced below in full and are also
+available from their respective repositories at the URLs above.
+
+================================================================
+Apache License 2.0 (sherpa-onnx + this wrapper's own code)
+================================================================
+
+(See the LICENSE file in this repository for the full text.)
+
+================================================================
+MIT License (ONNX Runtime)
+================================================================
+
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

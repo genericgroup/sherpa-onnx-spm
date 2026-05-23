@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# SPM build artifacts
+.build/
+.swiftpm/
+Package.resolved
+
+# Intermediate artifacts from build-xcframework.sh — the zipped
+# XCFramework is hosted on GitHub Releases, not committed to the repo.
+sherpa-onnx.xcframework/
+sherpa-onnx.xcframework.zip
+work/
+
+# Local scratch
+.scratch/
