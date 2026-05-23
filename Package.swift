@@ -61,9 +61,17 @@ let package = Package(
         .macOS(.v13),
     ],
     products: [
+        // Product bundles BOTH the binary XCFramework target AND
+        // a tiny Swift link-helper target. The binary provides the
+        // C symbols (consumer does `import CSherpaOnnx`); the
+        // link-helper carries `linkerSettings` so the consumer's
+        // link step automatically pulls in libc++ (sherpa-onnx is
+        // C++ and references std:: symbols). Without this, every
+        // consuming app would have to manually add `-lc++` to its
+        // Other Linker Flags.
         .library(
             name: "CSherpaOnnx",
-            targets: ["CSherpaOnnx"]
+            targets: ["CSherpaOnnx", "CSherpaOnnxLink"]
         ),
     ],
     targets: [
@@ -80,6 +88,33 @@ let package = Package(
             name: "CSherpaOnnx",
             url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.0/sherpa-onnx.xcframework.zip",
             checksum: "f537df7329312dabdcb69f5c49a7b1cc73199763b13b6e41ef676ea5a1d930ac"
+        ),
+        // Link-helper Swift target — single empty `.swift` file
+        // exists only to satisfy SPM's "targets need at least one
+        // source" requirement. The reason it exists at all is the
+        // `linkerSettings` block below: SPM's `.binaryTarget` does
+        // NOT support `linkerSettings`, so we attach the C++ stdlib
+        // (and any other required system libraries) here. When the
+        // consumer adds this package's product to their target, BOTH
+        // targets get linked — and `-lc++` propagates up.
+        //
+        // Consumers do NOT need to `import CSherpaOnnxLink`. Being
+        // in the product's target list is enough for the linker
+        // settings to apply.
+        .target(
+            name: "CSherpaOnnxLink",
+            dependencies: ["CSherpaOnnx"],
+            path: "Sources/CSherpaOnnxLink",
+            linkerSettings: [
+                .linkedLibrary("c++"),
+                // CoreAudioTypes is referenced by sherpa-onnx's audio
+                // I/O surface (WAVE save). The framework lives in the
+                // macOS / iOS SDKs under CoreAudio.framework's
+                // umbrella — `linkedFramework("CoreAudioTypes")` here
+                // resolves the auto-link warning the consumer would
+                // otherwise see at link time.
+                .linkedFramework("CoreAudioTypes"),
+            ]
         ),
     ]
 )
