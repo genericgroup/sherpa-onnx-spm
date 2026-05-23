@@ -78,7 +78,7 @@ let package = Package(
         // for the merge process).
         .binaryTarget(
             name: "CSherpaOnnx",
-            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.13.2/sherpa-onnx.xcframework.zip",
+            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.0/sherpa-onnx.xcframework.zip",
             checksum: "f537df7329312dabdcb69f5c49a7b1cc73199763b13b6e41ef676ea5a1d930ac"
         ),
     ]

@@ -38,15 +38,15 @@ The package does NOT ship the Swift API wrapper. See below.
 https://github.com/genericgroup/sherpa-onnx-spm.git
 ```
 
-Pin to **Exact Version `1.13.2`** (matching the upstream sherpa-onnx
-tag this release wraps).
+Pin to **Exact Version `1.0.0`** (the wrapper's first stable release,
+which wraps upstream sherpa-onnx v1.13.2).
 
 In `Package.swift`:
 
 ```swift
 dependencies: [
     .package(url: "https://github.com/genericgroup/sherpa-onnx-spm.git",
-             exact: "1.13.2"),
+             exact: "1.0.0"),
 ],
 targets: [
     .target(
@@ -57,6 +57,18 @@ targets: [
     ),
 ]
 ```
+
+## Versioning
+
+Wrapper versions are independent of upstream sherpa-onnx versions —
+the wrapper has its own SemVer track because it sometimes ships
+fixes (e.g. module map adjustments, libtool combine recipe updates)
+that don't correspond to upstream changes. Each wrapper release
+documents which upstream version it bundles in its release notes.
+
+| Wrapper version | Upstream sherpa-onnx version | ONNX Runtime |
+|---|---|---|
+| 1.0.0 | v1.13.2 | 1.17.1 |
 
 ### 2. Copy the upstream Swift API wrapper into your source tree
 
