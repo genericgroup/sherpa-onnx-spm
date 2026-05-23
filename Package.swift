@@ -86,8 +86,8 @@ let package = Package(
         // for the merge process).
         .binaryTarget(
             name: "CSherpaOnnx",
-            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.0/sherpa-onnx.xcframework.zip",
-            checksum: "f537df7329312dabdcb69f5c49a7b1cc73199763b13b6e41ef676ea5a1d930ac"
+            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.3/sherpa-onnx.xcframework.zip",
+            checksum: "bd5c0d14697340cbe33b9e1b846449b40b7b542b0acdb520ce935cd363bc757a"
         ),
         // Link-helper Swift target — single empty `.swift` file
         // exists only to satisfy SPM's "targets need at least one
