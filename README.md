@@ -1,33 +1,44 @@
 # sherpa-onnx-spm
 
-Swift Package Manager wrapper for [k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx).
+Swift Package Manager wrapper that exposes the
+[k2-fsa/sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
+XCFramework as a single SPM-installable binary target for iOS and
+macOS consumers.
 
 The upstream project doesn't ship a `Package.swift` — it publishes
-platform-specific XCFramework tarballs as Release assets and expects
-consumers to drop the Swift wrapper sources into their project
-manually. This repo wraps both into a single SPM-installable package
-so iOS / macOS apps can add sherpa-onnx via
-`File → Add Package Dependencies` in Xcode.
+platform-specific XCFramework tarballs and expects consumers to wire
+them into their projects manually. This repo does that wiring once:
+combines the iOS + macOS tarballs into one universal XCFramework
+(with ONNX Runtime statically merged into all slices), adds a Clang
+module map so Swift can `import` the C API directly, and publishes
+the result as a GitHub Release that SPM consumes via
+`.binaryTarget(url:checksum:)`.
 
-## What's bundled
+## What this package gives you
 
-| Component | Source | License |
-|---|---|---|
-| `sherpa-onnx.xcframework` — universal static lib | Merged from upstream's `sherpa-onnx-v1.13.2-ios.tar.bz2` + `sherpa-onnx-v1.13.2-macos-xcframework-static.tar.bz2` Release assets | Apache 2.0 |
-| ONNX Runtime 1.17.1 — statically merged into the XCFramework slices | Upstream sherpa-onnx Release bundle | MIT |
-| `Sources/SherpaOnnx/SherpaOnnx.swift` — Swift API wrapper | Verbatim copy of upstream's `swift-api-examples/SherpaOnnx.swift` with one added `import CSherpaOnnx` line (upstream relies on an Xcode bridging header that SPM packages can't use) | Apache 2.0 |
+- **`CSherpaOnnx`** — a Swift Package product exposing the
+  `CSherpaOnnx` Clang module. Importing it makes the entire
+  sherpa-onnx C API available to Swift code:
 
-See [`NOTICE`](NOTICE) for full upstream attribution.
+  ```swift
+  import CSherpaOnnx
+  // SherpaOnnxOfflineTtsConfig, SherpaOnnxCreateOfflineTts(...), etc.
+  // are now visible.
+  ```
 
-## Installation
+The package does NOT ship the Swift API wrapper. See below.
 
-In Xcode: **File → Add Package Dependencies** → paste this URL:
+## How to consume
+
+### 1. Add the SPM dependency in Xcode
+
+**File → Add Package Dependencies** → paste:
 
 ```
 https://github.com/genericgroup/sherpa-onnx-spm.git
 ```
 
-Pin to **Exact Version** `1.13.2` (matching the upstream sherpa-onnx
+Pin to **Exact Version `1.13.2`** (matching the upstream sherpa-onnx
 tag this release wraps).
 
 In `Package.swift`:
@@ -41,11 +52,48 @@ targets: [
     .target(
         name: "YourTarget",
         dependencies: [
-            .product(name: "SherpaOnnx", package: "sherpa-onnx-spm"),
+            .product(name: "CSherpaOnnx", package: "sherpa-onnx-spm"),
         ]
     ),
 ]
 ```
+
+### 2. Copy the upstream Swift API wrapper into your source tree
+
+Download
+[`swift-api-examples/SherpaOnnx.swift`](https://github.com/k2-fsa/sherpa-onnx/blob/v1.13.2/swift-api-examples/SherpaOnnx.swift)
+from the upstream sherpa-onnx repo at the matching version tag
+(v1.13.2) and drop it into your project's source tree (e.g.
+`MyApp/Vendor/sherpa-onnx/SherpaOnnx.swift`).
+
+Then prepend `import CSherpaOnnx` to the top of the file (the
+upstream wrapper relies on an Xcode bridging header that doesn't
+work in SPM; the import achieves the same effect):
+
+```swift
+import CSherpaOnnx     // ← add this line
+import Foundation
+// ... rest of the file unchanged
+```
+
+That's it. Your app code can now use the Swift API:
+
+```swift
+var ttsConfig = sherpaOnnxOfflineTtsConfig(...)
+let tts = SherpaOnnxOfflineTtsWrapper(config: &ttsConfig)
+let audio = tts.generate(text: "Hello.", sid: 0, speed: 1.0)
+```
+
+### Why "copy into your source tree" rather than expose from this package?
+
+The upstream Swift wrapper declares its classes / structs / functions
+without `public` modifiers — fine for its intended use (drop directly
+into your app's module where everything is implicitly visible), but
+fatal across an SPM module boundary, where consumers can't see
+internal symbols. Rewriting the upstream file to add `public`
+everywhere would work but creates ongoing maintenance friction for
+version bumps. Easier path: ship the BINARY only, let consumers
+drop the Swift wrapper into their own module.
 
 ## Platform support
 
@@ -55,31 +103,15 @@ targets: [
 - **Universal XCFramework:** one binary covers all three slices, no
   conditional linking needed in consumer projects
 
-## Usage
+## What's bundled in the XCFramework
 
-```swift
-import SherpaOnnx
+| Component | Source | License |
+|---|---|---|
+| `libsherpa-onnx.a` (per slice) | Merged from upstream's `sherpa-onnx-v1.13.2-ios.tar.bz2` + `sherpa-onnx-v1.13.2-macos-xcframework-static.tar.bz2` Release assets | Apache 2.0 |
+| ONNX Runtime 1.17.1 — statically merged into the iOS slices via `libtool -static`; already merged into the macOS slice upstream | Upstream sherpa-onnx Release bundle | MIT |
+| `sherpa-onnx/c-api/c-api.h` headers + `module.modulemap` | Verbatim from upstream | Apache 2.0 |
 
-// Configure a Kokoro TTS model.
-var ttsConfig = sherpaOnnxOfflineTtsConfig(
-    model: sherpaOnnxOfflineTtsModelConfig(
-        kokoro: sherpaOnnxOfflineTtsKokoroModelConfig(
-            model: "/path/to/kokoro-model.onnx",
-            voices: "/path/to/voices.bin",
-            tokens: "/path/to/tokens.txt",
-            dataDir: "/path/to/espeak-ng-data"
-        )
-    )
-)
-let tts = SherpaOnnxOfflineTtsWrapper(config: &ttsConfig)
-
-// Generate audio.
-let audio = tts.generate(text: "Hello, world.", sid: 0, speed: 1.0)
-// audio.samples is [Float], audio.sampleRate is Int.
-```
-
-For other model families (Piper VITS, Matcha, etc.) see
-[upstream Swift examples](https://github.com/k2-fsa/sherpa-onnx/tree/master/swift-api-examples).
+See [`NOTICE`](NOTICE) for full upstream attribution.
 
 ## Version pinning + upgrades
 
@@ -87,42 +119,24 @@ Releases of this repo are tagged to exactly match the upstream
 sherpa-onnx version they wrap. To upgrade:
 
 1. Read upstream changelog
-2. Update the wrapper via the build script:
+2. Run the build script for the new version:
    ```sh
    scripts/build-xcframework.sh <new-version>
    ```
-   (See [`scripts/build-xcframework.sh`](scripts/build-xcframework.sh) — runs the same download + libtool-combine + xcodebuild -create-xcframework + zip + checksum pipeline used for v1.13.2.)
-3. Tag a new release with the matching version
-4. Bump SPM dependency in consumer projects
-
-## Why a wrapper repo at all?
-
-Upstream sherpa-onnx ships:
-
-1. `sherpa-onnx-vN-ios.tar.bz2` — iOS slices, dynamic-linked to a
-   separate `onnxruntime.xcframework`
-2. `sherpa-onnx-vN-macos-xcframework-static.tar.bz2` — macOS slice
-   with ONNX Runtime statically merged
-3. `swift-api-examples/SherpaOnnx.swift` + a bridging header — not
-   packaged
-
-That's three artifacts in two different linkage configurations, none
-of which are SPM-consumable directly. This wrapper does the
-otherwise-manual work once: combines the iOS sherpa-onnx static lib
-with its matching ONNX Runtime static lib (so all iOS slices have
-ONNX Runtime merged in, matching the macOS slice's existing
-configuration), runs `xcodebuild -create-xcframework` to produce one
-universal XCFramework, adds a Clang module map so Swift can `import`
-the C API directly, and ships a `Package.swift`.
+   It prints the new SHA-256 checksum to paste into `Package.swift`
+3. Commit the `Package.swift` update, tag a new release, attach the
+   new XCFramework zip
+4. Bump SPM dependency in consumer projects + copy the matching
+   `SherpaOnnx.swift` from upstream's matching tag
 
 ## License
 
 The wrapper code (this repo's `Package.swift`, scripts, and docs) is
 Apache 2.0 — see [`LICENSE`](LICENSE).
 
-The bundled XCFramework and Swift wrapper source are derived from
-upstream sherpa-onnx (Apache 2.0) and ONNX Runtime (MIT). See
-[`NOTICE`](NOTICE) for full attribution.
+The bundled XCFramework is derived from upstream sherpa-onnx
+(Apache 2.0) and ONNX Runtime (MIT). See [`NOTICE`](NOTICE) for full
+attribution.
 
 ## Not affiliated with k2-fsa
 

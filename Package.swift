@@ -1,23 +1,16 @@
 // swift-tools-version: 6.0
 //
 // Swift Package wrapper for sherpa-onnx — exposes the upstream
-// k2-fsa/sherpa-onnx XCFramework + Swift API wrapper as a single
-// SPM-installable product for iOS and macOS consumers.
+// k2-fsa/sherpa-onnx XCFramework as a single SPM-installable
+// product for iOS and macOS consumers.
 //
 // Architecture:
 //
 //   ┌──────────────────────────────────────────────────────┐
 //   │ Consumer app (e.g. ArticleQ)                         │
-//   │   import SherpaOnnx                                  │
-//   └──────────────────────────────────────────────────────┘
-//                          ↓ depends on
-//   ┌──────────────────────────────────────────────────────┐
-//   │ Product: SherpaOnnx                                  │
-//   │   .target SherpaOnnx                                 │
-//   │     Sources/SherpaOnnx/SherpaOnnx.swift              │
-//   │       — Swift wrapper from upstream                  │
-//   │       swift-api-examples/SherpaOnnx.swift            │
-//   │     depends on → CSherpaOnnx (Clang module)          │
+//   │   import CSherpaOnnx                                  │
+//   │   (uses the upstream Swift wrapper                    │
+//   │    SherpaOnnx.swift dropped into its OWN source tree) │
 //   └──────────────────────────────────────────────────────┘
 //                          ↓ depends on
 //   ┌──────────────────────────────────────────────────────┐
@@ -28,7 +21,27 @@
 //   │     macos-arm64_x86_64                               │
 //   │   ONNX Runtime is statically merged into all slices, │
 //   │   so consumers only need to link THIS XCFramework.   │
+//   │   Headers expose the C API as the CSherpaOnnx Clang  │
+//   │   module via Headers/module.modulemap.               │
 //   └──────────────────────────────────────────────────────┘
+//
+// Why no Swift wrapper in the Sources/ tree:
+//
+// The upstream `swift-api-examples/SherpaOnnx.swift` declares its
+// classes / structs / functions WITHOUT a `public` modifier — by
+// design, since upstream expects you to drop the file directly into
+// your app's source tree where module-internal visibility is fine.
+//
+// If we exposed it from THIS package as a separate Swift module,
+// every consumer use would fail with "cannot find <type> in scope"
+// because the internal symbols don't cross the SPM module boundary.
+//
+// Rewriting the upstream file to mark everything `public` would
+// work, but creates ongoing maintenance friction for every upstream
+// version bump (~2249 lines, ~150 declarations need touching). So:
+// we ship the BINARY ONLY, and consumers copy SherpaOnnx.swift
+// verbatim into their own source tree — matching exactly what
+// upstream's README tells you to do.
 //
 // Upstream version: sherpa-onnx v1.13.2
 // Upstream ONNX Runtime: 1.17.1 (statically merged)
@@ -49,25 +62,11 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "SherpaOnnx",
-            targets: ["SherpaOnnx"]
+            name: "CSherpaOnnx",
+            targets: ["CSherpaOnnx"]
         ),
     ],
     targets: [
-        // Swift wrapper. The source file is a minimally-modified
-        // copy of upstream's `swift-api-examples/SherpaOnnx.swift`
-        // — only an `import CSherpaOnnx` was added at the top
-        // (upstream relies on an Xcode bridging header which
-        // doesn't work in SPM packages; the import achieves the
-        // same effect via the Clang module exposed by
-        // `CSherpaOnnx`'s module.modulemap). See NOTICE for
-        // attribution.
-        .target(
-            name: "SherpaOnnx",
-            dependencies: ["CSherpaOnnx"],
-            path: "Sources/SherpaOnnx"
-        ),
-
         // Binary XCFramework — sherpa-onnx static library with
         // ONNX Runtime merged in, exposing the C API via a
         // module.modulemap-defined Clang module called CSherpaOnnx.
