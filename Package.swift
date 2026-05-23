@@ -107,13 +107,20 @@ let package = Package(
             path: "Sources/CSherpaOnnxLink",
             linkerSettings: [
                 .linkedLibrary("c++"),
-                // CoreAudioTypes is referenced by sherpa-onnx's audio
-                // I/O surface (WAVE save). The framework lives in the
-                // macOS / iOS SDKs under CoreAudio.framework's
-                // umbrella — `linkedFramework("CoreAudioTypes")` here
-                // resolves the auto-link warning the consumer would
-                // otherwise see at link time.
-                .linkedFramework("CoreAudioTypes"),
+                // Note: sherpa-onnx's static lib carries an
+                // auto-link directive for `CoreAudioTypes`, which
+                // doesn't exist as a standalone framework on
+                // modern macOS / iOS (the types live in
+                // CoreAudio.framework's umbrella). The resulting
+                // linker WARNING is cosmetic — symbols still
+                // resolve from system frameworks the auto-link
+                // process also tries — and explicitly linking
+                // `CoreAudioTypes` HERE would turn the warning
+                // into a hard "framework not found" error.
+                // Leaving the warning unresolved is the correct
+                // (and minimal) trade-off; if a future sherpa-onnx
+                // version drops the auto-link directive, the
+                // warning will disappear on its own.
             ]
         ),
     ]
