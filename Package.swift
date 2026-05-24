@@ -48,6 +48,12 @@
 //   csukuangfj/onnxruntime-libs — NOT the ORT 1.17.1 bundled in
 //   sherpa-onnx's own iOS tarball, which is mismatched against
 //   the sherpa-onnx binary's API-version request of 24)
+// macOS slice: rebuilt from sherpa-onnx 1.13.2 source with CoreML
+//   EP ENABLED (upstream's macOS prebuilt explicitly defines
+//   `-DSHERPA_ONNX_DISABLE_COREML` in its static-ORT cmake module,
+//   leaving the macOS slice CPU-only). v1.0.5 reverses that.
+// iOS slice: upstream prebuilt, unchanged — already has CoreML
+//   enabled.
 // Build script: see scripts/build-xcframework.sh
 //
 
@@ -89,8 +95,8 @@ let package = Package(
         // for the merge process).
         .binaryTarget(
             name: "CSherpaOnnx",
-            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.4/sherpa-onnx.xcframework.zip",
-            checksum: "251c586423de7be12c4c137857f6698f17d81717e59bcc8050baaa968f8a4567"
+            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.5/sherpa-onnx.xcframework.zip",
+            checksum: "0b4f44b4c655555ac31347e4145df264a4201062afb48ad97195432470994ea1"
         ),
         // Link-helper Swift target — single empty `.swift` file
         // exists only to satisfy SPM's "targets need at least one

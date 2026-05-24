@@ -5,10 +5,28 @@
 # ONNX Runtime from `csukuangfj/onnxruntime-libs`.
 #
 # Usage:
-#   ./scripts/build-xcframework.sh <sherpa-version> <ort-version>
+#   ./scripts/build-xcframework.sh <sherpa-version> <ort-version> [<custom-macos-libsherpa-onnx-a>]
 #
-# Example:
+# Example (use upstream macOS prebuilt, NO CoreML):
 #   ./scripts/build-xcframework.sh 1.13.2 1.24.4
+#
+# Example (use a locally-built CoreML-enabled macOS slice — see v1.0.5):
+#   ./scripts/build-xcframework.sh 1.13.2 1.24.4 \
+#       /path/to/locally/built/install/lib/libsherpa-onnx.a
+#
+# Why the custom-macos-lib slot exists: upstream's
+# `sherpa-onnx-v1.13.2-macos-xcframework-static.tar.bz2` is built
+# with `-DSHERPA_ONNX_DISABLE_COREML` (see
+# cmake/onnxruntime-osx-{arm64,universal,x86_64}-static.cmake in
+# the upstream source — the static-ORT path explicitly opts out of
+# CoreML, presumably because Apple's static CoreML framework
+# linkage requires manual setup). If you want CoreML acceleration
+# on macOS, rebuild sherpa-onnx from source with those
+# `add_definitions(-DSHERPA_ONNX_DISABLE_COREML)` lines removed AND
+# `target_link_libraries(sherpa-onnx-core "-framework Foundation"
+# "-framework CoreML" "-framework Accelerate")` patched in, then
+# pass the resulting libsherpa-onnx.a as the third arg here. iOS is
+# unaffected — upstream's iOS prebuilt already has CoreML enabled.
 #
 # Why a separate ORT version arg:
 #
@@ -47,14 +65,16 @@
 #
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-    echo "Usage: $0 <sherpa-version> <ort-version>" >&2
+if [[ $# -lt 2 || $# -gt 3 ]]; then
+    echo "Usage: $0 <sherpa-version> <ort-version> [<custom-macos-libsherpa-onnx-a>]" >&2
     echo "Example: $0 1.13.2 1.24.4" >&2
+    echo "Example: $0 1.13.2 1.24.4 /tmp/sherpa-src/build-swift-macos/install/lib/libsherpa-onnx.a" >&2
     exit 2
 fi
 
 VERSION="$1"
 ORT_VERSION="$2"
+CUSTOM_MAC_LIB="${3:-}"
 WORK="$(mktemp -d -t sherpa-build-XXXXXX)"
 echo "→ Working directory: $WORK"
 cd "$WORK"
@@ -89,8 +109,23 @@ unzip -q "onnxruntime-osx-universal2-static_lib-${ORT_VERSION}.zip"
 # Resolve all input paths.
 SHERPA_IOS_DEV="ios-extracted/build-ios/sherpa-onnx.xcframework/ios-arm64/libsherpa-onnx.a"
 SHERPA_IOS_SIM="ios-extracted/build-ios/sherpa-onnx.xcframework/ios-arm64_x86_64-simulator/libsherpa-onnx.a"
-SHERPA_MAC="macos-extracted/sherpa-onnx-v${VERSION}-macos-xcframework-static/sherpa-onnx.xcframework/macos-arm64_x86_64/libsherpa-onnx.a"
 HDRS_SRC="ios-extracted/build-ios/sherpa-onnx.xcframework/ios-arm64/Headers"
+
+# macOS slice: prefer a caller-supplied custom .a (CoreML-enabled
+# build done out-of-band), fall back to upstream's prebuilt
+# otherwise. Upstream's prebuilt has CoreML disabled — see header
+# comment.
+if [[ -n "$CUSTOM_MAC_LIB" ]]; then
+    if [[ ! -e "$CUSTOM_MAC_LIB" ]]; then
+        echo "Error: custom macOS lib not found at: $CUSTOM_MAC_LIB" >&2
+        exit 1
+    fi
+    SHERPA_MAC="$CUSTOM_MAC_LIB"
+    echo "→ Using CUSTOM macOS sherpa-onnx slice: $SHERPA_MAC"
+else
+    SHERPA_MAC="macos-extracted/sherpa-onnx-v${VERSION}-macos-xcframework-static/sherpa-onnx.xcframework/macos-arm64_x86_64/libsherpa-onnx.a"
+    echo "→ Using UPSTREAM macOS sherpa-onnx slice (CoreML disabled): $SHERPA_MAC"
+fi
 
 # ORT iOS XCFramework: ships the static archive inside an
 # onnxruntime.framework bundle. The binary file (named
