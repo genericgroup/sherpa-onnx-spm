@@ -44,7 +44,10 @@
 // upstream's README tells you to do.
 //
 // Upstream version: sherpa-onnx v1.13.2
-// Upstream ONNX Runtime: 1.17.1 (statically merged)
+// Upstream ONNX Runtime: 1.24.4 (statically merged from
+//   csukuangfj/onnxruntime-libs — NOT the ORT 1.17.1 bundled in
+//   sherpa-onnx's own iOS tarball, which is mismatched against
+//   the sherpa-onnx binary's API-version request of 24)
 // Build script: see scripts/build-xcframework.sh
 //
 
@@ -86,8 +89,8 @@ let package = Package(
         // for the merge process).
         .binaryTarget(
             name: "CSherpaOnnx",
-            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.3/sherpa-onnx.xcframework.zip",
-            checksum: "bd5c0d14697340cbe33b9e1b846449b40b7b542b0acdb520ce935cd363bc757a"
+            url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v1.0.4/sherpa-onnx.xcframework.zip",
+            checksum: "251c586423de7be12c4c137857f6698f17d81717e59bcc8050baaa968f8a4567"
         ),
         // Link-helper Swift target — single empty `.swift` file
         // exists only to satisfy SPM's "targets need at least one

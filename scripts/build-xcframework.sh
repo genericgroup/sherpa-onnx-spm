@@ -1,77 +1,120 @@
 #!/usr/bin/env bash
 #
 # build-xcframework.sh — build a universal sherpa-onnx XCFramework
-# from upstream v<VERSION> release tarballs.
+# from upstream v<VERSION> release tarballs PLUS a matched-version
+# ONNX Runtime from `csukuangfj/onnxruntime-libs`.
 #
 # Usage:
-#   ./scripts/build-xcframework.sh <upstream-version>
+#   ./scripts/build-xcframework.sh <sherpa-version> <ort-version>
 #
 # Example:
-#   ./scripts/build-xcframework.sh 1.13.2
+#   ./scripts/build-xcframework.sh 1.13.2 1.24.4
+#
+# Why a separate ORT version arg:
+#
+# sherpa-onnx v1.13.2's `-ios.tar.bz2` ships sherpa-onnx binaries
+# compiled against ORT API 24 (= ORT 1.20+) but bundles an ORT
+# 1.17.1 binary. Linking that mismatched bundle at runtime gives:
+#
+#   "The requested API version [24] is not available, only API
+#    versions [1, 17] are supported in this build. Current ORT
+#    Version is: 1.17.1."
+#
+# Fix: ignore the ORT bundled in upstream's iOS tar and fetch a
+# matching ORT (1.24.4 carries API 24) from
+# `csukuangfj/onnxruntime-libs`, which publishes the same ORT
+# XCFrameworks sherpa-onnx itself consumes.
 #
 # Pipeline:
-#   1. Download upstream iOS + macOS XCFramework tarballs
-#   2. Combine each iOS sherpa-onnx static lib with its matching ONNX
-#      Runtime static lib (libtool) so all iOS slices have ONNX
-#      Runtime statically merged in — matches the macOS slice's
-#      existing configuration. After this, consumers link only
-#      sherpa-onnx.xcframework, never a separate ONNX Runtime.
-#   3. Write Headers/module.modulemap exposing the C API as a Clang
-#      module called CSherpaOnnx (so Swift can `import CSherpaOnnx`
-#      directly — upstream relies on an Xcode bridging header that
-#      SPM packages can't use).
-#   4. Run `xcodebuild -create-xcframework` to produce the universal
+#   1. Download upstream sherpa-onnx iOS + macOS XCFramework tarballs
+#   2. Download matched ORT iOS XCFramework + macOS universal static
+#      lib from csukuangfj/onnxruntime-libs
+#   3. Combine each sherpa-onnx static lib with its matching ORT
+#      static lib (libtool merge) per-arch. macOS needs extra
+#      handling because its ORT ships as three split .a files
+#      (libonnxruntime + libonnxruntime_mlas_arm64 +
+#       libonnxruntime_mlas_x86_64) — we merge per-arch then lipo
+#      them universal.
+#   4. Write Headers/module.modulemap exposing the C API as a Clang
+#      module called CSherpaOnnx.
+#   5. Run `xcodebuild -create-xcframework` to produce the universal
 #      sherpa-onnx.xcframework.
-#   5. Zip it (SPM .binaryTarget requires .zip, not .tar.bz2) and
-#      compute the SHA-256 for Package.swift.
+#   6. Zip it (SPM .binaryTarget requires .zip) and compute the
+#      SHA-256 for Package.swift.
 #
 # Output: sherpa-onnx.xcframework.zip + the SHA-256 checksum line to
 # paste into Package.swift.
 #
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-    echo "Usage: $0 <upstream-version>" >&2
-    echo "Example: $0 1.13.2" >&2
+if [[ $# -ne 2 ]]; then
+    echo "Usage: $0 <sherpa-version> <ort-version>" >&2
+    echo "Example: $0 1.13.2 1.24.4" >&2
     exit 2
 fi
 
 VERSION="$1"
+ORT_VERSION="$2"
 WORK="$(mktemp -d -t sherpa-build-XXXXXX)"
 echo "→ Working directory: $WORK"
 cd "$WORK"
 
 # ----------------------------------------------------------------------
-# 1. Download upstream tarballs.
+# 1. Download upstream sherpa-onnx tarballs.
 # ----------------------------------------------------------------------
 
 UPSTREAM="https://github.com/k2-fsa/sherpa-onnx/releases/download/v${VERSION}"
-echo "→ Downloading from $UPSTREAM ..."
+echo "→ Downloading sherpa-onnx v${VERSION} ..."
 curl -fLO "${UPSTREAM}/sherpa-onnx-v${VERSION}-ios.tar.bz2"
 curl -fLO "${UPSTREAM}/sherpa-onnx-v${VERSION}-macos-xcframework-static.tar.bz2"
 
-echo "→ Extracting tarballs ..."
+echo "→ Extracting sherpa-onnx tarballs ..."
 mkdir -p ios-extracted macos-extracted
 tar -xjf "sherpa-onnx-v${VERSION}-ios.tar.bz2" -C ios-extracted
 tar -xjf "sherpa-onnx-v${VERSION}-macos-xcframework-static.tar.bz2" -C macos-extracted
 
-# Pin to expected paths inside each tarball (may need adjustment if
-# upstream changes layout — verify with `find ios-extracted -name '*.a'`).
+# ----------------------------------------------------------------------
+# 2. Download matched-version ORT prebuilts.
+# ----------------------------------------------------------------------
+
+ORT_UPSTREAM="https://github.com/csukuangfj/onnxruntime-libs/releases/download/v${ORT_VERSION}"
+echo "→ Downloading ORT v${ORT_VERSION} ..."
+curl -fLO "${ORT_UPSTREAM}/onnxruntime-ios-static-xcframework-${ORT_VERSION}.zip"
+curl -fLO "${ORT_UPSTREAM}/onnxruntime-osx-universal2-static_lib-${ORT_VERSION}.zip"
+
+echo "→ Extracting ORT zips ..."
+unzip -q "onnxruntime-ios-static-xcframework-${ORT_VERSION}.zip"
+unzip -q "onnxruntime-osx-universal2-static_lib-${ORT_VERSION}.zip"
+
+# Resolve all input paths.
 SHERPA_IOS_DEV="ios-extracted/build-ios/sherpa-onnx.xcframework/ios-arm64/libsherpa-onnx.a"
 SHERPA_IOS_SIM="ios-extracted/build-ios/sherpa-onnx.xcframework/ios-arm64_x86_64-simulator/libsherpa-onnx.a"
 SHERPA_MAC="macos-extracted/sherpa-onnx-v${VERSION}-macos-xcframework-static/sherpa-onnx.xcframework/macos-arm64_x86_64/libsherpa-onnx.a"
 HDRS_SRC="ios-extracted/build-ios/sherpa-onnx.xcframework/ios-arm64/Headers"
 
-# Locate the ONNX Runtime version directory dynamically (upstream
-# bumps it across releases — e.g. 1.17.1 in v1.13.2 but may change).
-ONNX_DIR_ROOT="ios-extracted/build-ios/ios-onnxruntime"
-ONNX_VER_DIR="$(ls "$ONNX_DIR_ROOT" | head -1)"
-ONNX_IOS_DEV="${ONNX_DIR_ROOT}/${ONNX_VER_DIR}/onnxruntime.xcframework/ios-arm64/onnxruntime.a"
-ONNX_IOS_SIM="${ONNX_DIR_ROOT}/${ONNX_VER_DIR}/onnxruntime.xcframework/ios-arm64_x86_64-simulator/onnxruntime.a"
+# ORT iOS XCFramework: ships the static archive inside an
+# onnxruntime.framework bundle. The binary file (named
+# `onnxruntime`, with no .a extension) is still a Mach-O ar
+# archive — usable as a static lib by libtool.
+ORT_IOS_DEV="onnxruntime-ios-static-xcframework-${ORT_VERSION}/onnxruntime.xcframework/ios-arm64/onnxruntime.framework/onnxruntime"
+ORT_IOS_SIM="onnxruntime-ios-static-xcframework-${ORT_VERSION}/onnxruntime.xcframework/ios-arm64_x86_64-simulator/onnxruntime.framework/onnxruntime"
 
-# Sanity-check that all six input files exist.
+# ORT macOS: ships as 3 split static libs.
+#   - libonnxruntime.a              (universal arm64+x86_64; the bulk)
+#   - libonnxruntime_mlas_arm64.a   (arm64-only matrix-multiply backend)
+#   - libonnxruntime_mlas_x86_64.a  (x86_64-only matrix-multiply backend)
+# All three are required for a complete link. We merge per-arch
+# then lipo into a universal sherpa-onnx.a.
+ORT_MAC_LIB_DIR="onnxruntime-osx-universal2-static_lib-${ORT_VERSION}/lib"
+ORT_MAC_UNIVERSAL="${ORT_MAC_LIB_DIR}/libonnxruntime.a"
+ORT_MAC_MLAS_ARM64="${ORT_MAC_LIB_DIR}/libonnxruntime_mlas_arm64.a"
+ORT_MAC_MLAS_X86_64="${ORT_MAC_LIB_DIR}/libonnxruntime_mlas_x86_64.a"
+
+# Sanity-check every input.
 for f in "$SHERPA_IOS_DEV" "$SHERPA_IOS_SIM" "$SHERPA_MAC" \
-         "$ONNX_IOS_DEV" "$ONNX_IOS_SIM" "$HDRS_SRC"; do
+         "$ORT_IOS_DEV" "$ORT_IOS_SIM" \
+         "$ORT_MAC_UNIVERSAL" "$ORT_MAC_MLAS_ARM64" "$ORT_MAC_MLAS_X86_64" \
+         "$HDRS_SRC"; do
     if [[ ! -e "$f" ]]; then
         echo "Error: expected input missing: $f" >&2
         exit 1
@@ -79,39 +122,46 @@ for f in "$SHERPA_IOS_DEV" "$SHERPA_IOS_SIM" "$SHERPA_MAC" \
 done
 
 # ----------------------------------------------------------------------
-# 2. Combine iOS sherpa-onnx + ONNX Runtime into single static libs per slice.
+# 3. Combine sherpa-onnx + ONNX Runtime per slice.
 # ----------------------------------------------------------------------
 
 mkdir -p combined/ios-arm64 combined/ios-sim combined/macos combined/headers
 
-echo "→ Combining iOS device slice (sherpa-onnx + ONNX Runtime) ..."
+echo "→ Combining iOS device slice (sherpa-onnx + ORT ${ORT_VERSION}) ..."
 libtool -static -o combined/ios-arm64/libsherpa-onnx.a \
-    "$SHERPA_IOS_DEV" "$ONNX_IOS_DEV" 2>&1 | grep -v "no symbols" | grep -v "same member name" || true
+    "$SHERPA_IOS_DEV" "$ORT_IOS_DEV" 2>&1 | grep -v "no symbols" | grep -v "same member name" || true
 
-echo "→ Combining iOS simulator slice (sherpa-onnx + ONNX Runtime) ..."
+echo "→ Combining iOS simulator slice (sherpa-onnx + ORT ${ORT_VERSION}) ..."
 libtool -static -o combined/ios-sim/libsherpa-onnx.a \
-    "$SHERPA_IOS_SIM" "$ONNX_IOS_SIM" 2>&1 | grep -v "no symbols" | grep -v "same member name" || true
+    "$SHERPA_IOS_SIM" "$ORT_IOS_SIM" 2>&1 | grep -v "no symbols" | grep -v "same member name" || true
 
-# Despite the upstream tarball name "macos-xcframework-STATIC", the
-# macOS sherpa-onnx.a does NOT have ONNX Runtime merged in — "static"
-# here refers to "shipped as a static archive," not "deps statically
-# linked." The macOS slice in the onnxruntime.xcframework (the one
-# shipped INSIDE the iOS tarball, which carries iOS + iOS-sim + macos
-# slices) is where the macOS ONNX symbols live. Combine both, same as
-# we did for iOS.
-ONNX_MAC="${ONNX_DIR_ROOT}/${ONNX_VER_DIR}/onnxruntime.xcframework/macos-arm64_x86_64/onnxruntime.a"
-if [[ ! -e "$ONNX_MAC" ]]; then
-    echo "Error: expected macOS onnxruntime.a missing: $ONNX_MAC" >&2
-    echo "       (Did upstream change the onnxruntime.xcframework layout?)" >&2
-    exit 1
-fi
+# macOS: need to merge per-arch because the mlas backends ship as
+# arch-specific archives. Slice each universal input by arch, then
+# libtool-merge per-arch, then lipo-create the final universal.
+echo "→ Slicing sherpa-onnx macOS (arm64 + x86_64) ..."
+lipo -thin arm64  "$SHERPA_MAC"          -output mac-arm64-sherpa.a
+lipo -thin x86_64 "$SHERPA_MAC"          -output mac-x86_64-sherpa.a
 
-echo "→ Combining macOS slice (sherpa-onnx + ONNX Runtime) ..."
-libtool -static -o combined/macos/libsherpa-onnx.a \
-    "$SHERPA_MAC" "$ONNX_MAC" 2>&1 | grep -v "no symbols" | grep -v "same member name" || true
+echo "→ Slicing ORT macOS libonnxruntime.a (arm64 + x86_64) ..."
+lipo -thin arm64  "$ORT_MAC_UNIVERSAL"   -output mac-arm64-ort.a
+lipo -thin x86_64 "$ORT_MAC_UNIVERSAL"   -output mac-x86_64-ort.a
+
+echo "→ Merging macOS arm64 slice (sherpa + ort + mlas_arm64) ..."
+libtool -static -o mac-arm64-merged.a \
+    mac-arm64-sherpa.a mac-arm64-ort.a "$ORT_MAC_MLAS_ARM64" \
+    2>&1 | grep -v "no symbols" | grep -v "same member name" || true
+
+echo "→ Merging macOS x86_64 slice (sherpa + ort + mlas_x86_64) ..."
+libtool -static -o mac-x86_64-merged.a \
+    mac-x86_64-sherpa.a mac-x86_64-ort.a "$ORT_MAC_MLAS_X86_64" \
+    2>&1 | grep -v "no symbols" | grep -v "same member name" || true
+
+echo "→ Lipo-creating universal macOS libsherpa-onnx.a ..."
+lipo -create mac-arm64-merged.a mac-x86_64-merged.a \
+    -output combined/macos/libsherpa-onnx.a
 
 # ----------------------------------------------------------------------
-# 3. Stage headers + module.modulemap.
+# 4. Stage headers + module.modulemap.
 # ----------------------------------------------------------------------
 
 cp -R "$HDRS_SRC"/. combined/headers/
@@ -123,7 +173,7 @@ module CSherpaOnnx {
 MODMAP
 
 # ----------------------------------------------------------------------
-# 4. Build universal XCFramework.
+# 5. Build universal XCFramework.
 # ----------------------------------------------------------------------
 
 echo "→ Creating universal sherpa-onnx.xcframework ..."
@@ -134,56 +184,39 @@ xcodebuild -create-xcframework \
     -output sherpa-onnx.xcframework
 
 # ----------------------------------------------------------------------
-# 5. Zip + checksum.
+# 6. Zip + checksum.
 # ----------------------------------------------------------------------
 
 echo "→ Zipping XCFramework ..."
-# SPM `.binaryTarget(url:checksum:)` expects a ZIP archive that
-# contains the .xcframework at its root.
 zip -qr sherpa-onnx.xcframework.zip sherpa-onnx.xcframework
 
-# Apple expects the checksum to be computed by `swift package
-# compute-checksum`. shasum produces a different format; SPM uses
-# its own. We invoke `swift package compute-checksum` if available.
 echo "→ Computing checksum ..."
 if command -v swift >/dev/null 2>&1; then
     CHECKSUM=$(swift package compute-checksum sherpa-onnx.xcframework.zip 2>&1 | tail -1)
 else
-    # Fallback: SPM accepts the hex digest of SHA-256.
     CHECKSUM=$(shasum -a 256 sherpa-onnx.xcframework.zip | awk '{print $1}')
 fi
 
 ZIP_SIZE=$(stat -f%z sherpa-onnx.xcframework.zip 2>/dev/null || stat -c%s sherpa-onnx.xcframework.zip)
 ZIP_MB=$(( ZIP_SIZE / 1048576 ))
 
-# ----------------------------------------------------------------------
-# Output.
-# ----------------------------------------------------------------------
-
 OUTPUT_DIR="$(pwd)"
 
 cat <<EOF
 
 ═══════════════════════════════════════════════════════════════════
-✓ Built sherpa-onnx.xcframework.zip for upstream v${VERSION}
+✓ Built sherpa-onnx.xcframework.zip for sherpa v${VERSION} + ORT v${ORT_VERSION}
 
 Output:
-  $OUTPUT_DIR/sherpa-onnx.xcframework.zip  (${ZIP_MB} MB)
+  ${OUTPUT_DIR}/sherpa-onnx.xcframework.zip   (${ZIP_MB} MB)
 
-Update Package.swift with:
+SPM Package.swift binaryTarget snippet:
 
   .binaryTarget(
       name: "CSherpaOnnx",
-      url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/v${VERSION}/sherpa-onnx.xcframework.zip",
+      url: "https://github.com/genericgroup/sherpa-onnx-spm/releases/download/<RELEASE>/sherpa-onnx.xcframework.zip",
       checksum: "${CHECKSUM}"
   )
-
-Then publish the release:
-
-  gh release create v${VERSION} \\
-      "$OUTPUT_DIR/sherpa-onnx.xcframework.zip" \\
-      --title "v${VERSION}" \\
-      --notes "Wraps upstream sherpa-onnx v${VERSION}. See NOTICE for attribution."
 
 ═══════════════════════════════════════════════════════════════════
 EOF
